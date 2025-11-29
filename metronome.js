@@ -243,6 +243,7 @@ export default class Metronome {
           this.polyState = {
             bar: barIndex,
             start: barStartTime,
+            end: barStartTime + this.beatsPerBar * beatDuration,
             intervalA: barDuration / validA,
             intervalB: barDuration / validB,
             nextA: barStartTime,
@@ -287,12 +288,6 @@ export default class Metronome {
       }
 
       // Polyrhythm layers
-      const barEnd = barStartTime + this.beatsPerBar * beatDuration;
-      if (this.polyrhythm.enabled) {
-        this._schedulePolyrhythmLayer('A', horizon, barEnd, playAudio);
-        this._schedulePolyrhythmLayer('B', horizon, barEnd, playAudio);
-      }
-
       if (typeof this.onTick === 'function') {
         this.onTick({ layer: 'main', beat: beatInBar, bar: barIndex, time: this.nextNoteTime, countIn: isCountIn });
       }
@@ -310,9 +305,15 @@ export default class Metronome {
         }
       }
     }
+
+    // Always schedule polyrhythm layers to the same horizon, even if no main beats land in the window.
+    if (this.polyrhythm.enabled && this.polyState.intervalA && this.polyState.intervalB) {
+      this._schedulePolyrhythmLayer('A', horizon, playAudio);
+      this._schedulePolyrhythmLayer('B', horizon, playAudio);
+    }
   }
 
-  _schedulePolyrhythmLayer(layerKey, horizon, barEnd, playAudio) {
+  _schedulePolyrhythmLayer(layerKey, horizon, playAudio) {
     const isA = layerKey === 'A';
     const interval = isA ? this.polyState.intervalA : this.polyState.intervalB;
     if (!interval || interval <= 0 || Number.isNaN(interval)) return;
@@ -321,12 +322,12 @@ export default class Metronome {
     const gainScale = isA ? this.polyrhythm.volumeA : this.polyrhythm.volumeB;
     const ctx = this.audioCtx;
 
-    // Catch up if we fell behind the current bar time due to lookahead windows.
     const start = this.polyState.start || ctx.currentTime;
-    if (next < start) next = start;
-    if (next < ctx.currentTime - interval) {
-      const stepsBehind = Math.ceil((ctx.currentTime - start) / interval);
-      next = start + stepsBehind * interval;
+    const barEnd = this.polyState.end || start + this.beatsPerBar * (60 / this.bpm);
+
+    // Catch up just enough so we don't schedule in the past, but without skipping future hits.
+    while (next + 0.0005 < ctx.currentTime) {
+      next += interval;
     }
 
     const cutoff = Math.min(horizon, barEnd + 0.0005);
