@@ -34,7 +34,10 @@ export class GamesController {
   }
 
   startSilent(leadBars = 2, silentBars = 2) {
-    const beatDur = 60000 / this.getSettings().bpm;
+    const bpm = this.getSettings().bpm;
+    const sig = this.getSettings().timeSignature || '4/4';
+    const den = parseInt(sig.split('/')[1], 10) || 4;
+    const beatDur = (60000 / bpm) * (4 / den);
     const beatsPerBar = parseInt(this.getSettings().timeSignature.split('/')[0], 10) || 4;
     const totalBeats = (leadBars + silentBars) * beatsPerBar;
     this.active = GAME_MODES.SILENT;
@@ -56,11 +59,12 @@ export class GamesController {
         ? patternInput
         : BUILT_IN_PATTERNS.find((p) => p.id === patternInput) || BUILT_IN_PATTERNS[0];
     this.active = GAME_MODES.COPY;
-    this.state = { pattern, phase: 'listen', taps: [], started: performance.now() };
+    this.state = { pattern, phase: 'listen', taps: [], listenStart: performance.now(), tapStart: null };
     this.setStatus(GAME_MODES.COPY, `Listen, then tap the pattern: ${pattern.name}`);
     setTimeout(() => {
       if (this.active === GAME_MODES.COPY) {
         this.state.phase = 'tap';
+        this.state.tapStart = performance.now();
         this.setStatus(GAME_MODES.COPY, 'Your turn: tap the pattern');
         setTimeout(() => {
           if (this.active === GAME_MODES.COPY) this._finishCopy();
@@ -124,7 +128,7 @@ export class GamesController {
   _scoreSilent(timeMs) {
     const s = this.state;
     if (!s.startTimeMs) return;
-    const beatIndex = Math.round((timeMs - s.startTimeMs) / s.beatDur);
+    const beatIndex = Math.floor((timeMs - s.startTimeMs) / s.beatDur);
     s.taps.push({ beatIndex, timeMs });
     if (beatIndex >= s.totalBeats) this._finishSilent();
   }
@@ -149,13 +153,15 @@ export class GamesController {
     const { pattern, taps } = this.state;
     if (!pattern) return;
     const beats = parseInt((pattern.timeSignature || '4/4').split('/')[0], 10) || 4;
-    const beatDurMs = 60000 / this.getSettings().bpm;
+    const den = parseInt((pattern.timeSignature || '4/4').split('/')[1], 10) || 4;
+    const beatDurMs = (60000 / this.getSettings().bpm) * (4 / den);
     const barDur = beatDurMs * beats;
     const subDur = barDur / (pattern.steps.length || 1);
+    const tapStart = this.state.tapStart || this.state.listenStart || performance.now();
     const expected = pattern.steps
       .map((hit, idx) => (hit ? idx * subDur : null))
       .filter((v) => v !== null);
-    const correct = taps.filter((t) => expected.some((e) => Math.abs(t - this.state.started - e) < subDur * 0.4));
+    const correct = taps.filter((t) => expected.some((e) => Math.abs(t - tapStart - e) < subDur * 0.4));
     const pct = expected.length ? (correct.length / expected.length) * 100 : 0;
     this.setStatus(GAME_MODES.COPY, `Matched ${pct.toFixed(0)}% of hits`);
     const res = { mode: GAME_MODES.COPY, percent: pct };
