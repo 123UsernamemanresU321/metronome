@@ -515,7 +515,13 @@ input[type='range'] {
 }
 
 .custom-time.active {
-  display: flex;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.custom-time input {
+  width: 70px;
 }
 
 .slider-row {
