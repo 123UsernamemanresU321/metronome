@@ -4,6 +4,9 @@
 const SOUND_PROFILES = {
   woodblock: { accentFreq: 1900, normalFreq: 1500, subFreq: 1200, type: 'square' },
   beep: { accentFreq: 1200, normalFreq: 880, subFreq: 660, type: 'sine' },
+  click: { accentFreq: 2600, normalFreq: 2200, subFreq: 1800, type: 'triangle' },
+  clave: { accentFreq: 1800, normalFreq: 1400, subFreq: 1000, type: 'sawtooth' },
+  cowbell: { accentFreq: 1200, normalFreq: 950, subFreq: 750, type: 'square' },
   ping: { accentFreq: 2300, normalFreq: 2000, subFreq: 1800, type: 'triangle' }, // for phrase/phrase pings
 };
 
@@ -26,6 +29,8 @@ export default class Metronome {
     this.subdivisionPattern = {
       eighth: ['accent', 'normal'],
       triplet: ['accent', 'normal', 'normal'],
+      sixteenth: ['accent', 'normal', 'normal', 'normal'],
+      quintuplet: ['accent', 'normal', 'normal', 'normal', 'normal'],
     };
     this.swing = 0; // 0-1
     this.sound = 'woodblock';
@@ -90,7 +95,7 @@ export default class Metronome {
   }
 
   setBpm(bpm) {
-    this.bpm = clamp(bpm, 20, 300);
+    this.bpm = clamp(bpm, 1, 600);
   }
 
   setTimeSignature(signature) {
@@ -205,7 +210,16 @@ export default class Metronome {
       const isCountIn = this.isCountingIn;
       const playAudio = !this.muted && !this.quietMode && !isSilentBar;
       const subPattern = this.subdivisionPattern[this.subdivision] || [];
-      const totalSubdivisions = this.subdivision === 'eighth' ? 2 : this.subdivision === 'triplet' ? 3 : 1;
+      const totalSubdivisions =
+        this.subdivision === 'eighth'
+          ? 2
+          : this.subdivision === 'triplet'
+          ? 3
+          : this.subdivision === 'sixteenth'
+          ? 4
+          : this.subdivision === 'quintuplet'
+          ? 5
+          : 1;
       const offsetTime = Math.max(ctx.currentTime + 0.001, this.nextNoteTime - this.latencyOffset);
 
       if (beatInBar === 0) {
