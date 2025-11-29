@@ -200,7 +200,7 @@ export default class Metronome {
   }
 
   _resetPolyState() {
-    this.polyState = { intervalA: 0, intervalB: 0, nextA: 0, nextB: 0, bar: -1, start: 0 };
+    this.polyState = { intervalA: 0, intervalB: 0, nextA: 0, nextB: 0, bar: -1, start: 0, end: 0 };
   }
 
   _scheduler() {
@@ -307,15 +307,16 @@ export default class Metronome {
 
     // Polyrhythm layers: schedule independently of main-beat loop so we never miss mid-beat clicks.
     if (this.polyrhythm.enabled && this.polyState.intervalA && this.polyState.intervalB) {
-      this._schedulePolyrhythmLayer('A', horizon, playAudio);
-      this._schedulePolyrhythmLayer('B', horizon, playAudio);
+      const polyPlay = !this.muted && !this.quietMode;
+      this._schedulePolyrhythmLayer('A', horizon, polyPlay);
+      this._schedulePolyrhythmLayer('B', horizon, polyPlay);
     }
   }
 
   _schedulePolyrhythmLayer(layerKey, horizon, playAudio) {
     const isA = layerKey === 'A';
     const interval = isA ? this.polyState.intervalA : this.polyState.intervalB;
-    if (!interval || interval <= 0 || Number.isNaN(interval)) return;
+    if (!interval || interval <= 0 || Number.isNaN(interval) || !this.polyState.start) return;
     let next = isA ? this.polyState.nextA : this.polyState.nextB;
     const sound = isA ? this.polyrhythm.soundA : this.polyrhythm.soundB;
     const gainScale = isA ? this.polyrhythm.volumeA : this.polyrhythm.volumeB;
