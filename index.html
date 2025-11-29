@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Piano Metronome Pro</title>
+  <meta name="theme-color" content="#0f172a">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-dark">
+  <div class="app-shell">
+    <header class="top-bar">
+      <div>
+        <p class="eyebrow">Practice Companion</p>
+        <h1>Piano Metronome Pro</h1>
+        <p class="subtext" id="audioStatus" role="status" aria-live="polite">Audio ready</p>
+      </div>
+      <div class="top-actions">
+        <div id="offlineBadge" class="chip muted" aria-live="polite">Offline-ready</div>
+        <button id="audioHelp" class="ghost-btn small" aria-label="Audio help" title="If you do not hear clicks, tap Start, unmute, or interact to unlock audio. Mobile Safari requires user gesture.">Audio Help</button>
+        <button id="quietToggle" class="ghost-btn" aria-pressed="false">Silent Visual Mode</button>
+        <button id="themeToggle" class="ghost-btn" aria-label="Toggle theme">🌙 Dark</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel controls" aria-label="Main controls">
+        <div class="tempo-block">
+          <div class="tempo-header">
+            <span class="label">Tempo (BPM)</span>
+            <div class="bpm-actions">
+              <button id="bpmDown" class="pill-btn" aria-label="Decrease BPM">-</button>
+              <button id="bpmUp" class="pill-btn" aria-label="Increase BPM">+</button>
+            </div>
+          </div>
+          <div class="tempo-display" id="bpmDisplay">120</div>
+          <p class="subtext danger" id="bpmError" hidden></p>
+          <div class="tempo-inputs">
+            <input id="bpmInput" type="number" min="20" max="300" step="1" aria-label="BPM input">
+            <input id="bpmSlider" type="range" min="20" max="300" step="1" aria-label="BPM slider">
+          </div>
+        </div>
+
+        <div class="row two-col">
+          <div>
+            <label class="label" for="timeSignature">Time Signature</label>
+            <select id="timeSignature">
+              <option value="2/4">2 / 4</option>
+              <option value="3/4">3 / 4</option>
+              <option value="4/4" selected>4 / 4</option>
+              <option value="6/8">6 / 8</option>
+            </select>
+          </div>
+          <div>
+            <label class="label" for="subdivision">Subdivision</label>
+            <select id="subdivision">
+              <option value="none">None</option>
+              <option value="eighth">Eighth Notes</option>
+              <option value="triplet">Triplets</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row two-col">
+          <div>
+            <label class="label">Subdivision Accents</label>
+            <div id="subdivisionPattern" class="subdivision-pattern"></div>
+          </div>
+          <div>
+            <label class="label">Swing</label>
+            <div class="slider-row">
+              <input id="swingSlider" type="range" min="0" max="100" step="1">
+              <span id="swingValue" class="chip">0%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="row two-col">
+          <div>
+            <label class="label" for="countInToggle">Count-in</label>
+            <div class="inline-group">
+              <input id="countInToggle" type="checkbox">
+              <input id="countInBars" type="number" min="1" max="4" value="1">
+              <span class="subtext">bars</span>
+            </div>
+          </div>
+          <div>
+            <label class="label">Groove Challenge</label>
+            <div class="slider-row">
+              <input id="grooveSlider" type="range" min="0" max="100" step="1">
+              <span id="grooveLabel" class="chip">Easy</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="row two-col sound-row">
+          <div>
+            <label class="label" for="soundSelect">Sound</label>
+            <select id="soundSelect">
+              <option value="woodblock">Woodblock</option>
+              <option value="beep">Beep</option>
+            </select>
+          </div>
+          <div class="volume-group">
+            <label class="label" for="volume">Volume</label>
+            <div class="volume-controls">
+              <input id="volume" type="range" min="0" max="1" step="0.01" aria-label="Master volume">
+              <button id="muteToggle" class="ghost-btn small" aria-pressed="false">Mute</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="visual-area">
+          <div class="pulse" id="pulse" aria-hidden="true"></div>
+          <div class="beat-indicators" id="beatIndicators" aria-label="Beat accents"></div>
+          <div class="poly-visual" id="polyVisual">
+            <div class="poly-row">
+              <span class="label">Layer A</span>
+              <div id="polyDotsA" class="beat-indicators compact"></div>
+            </div>
+            <div class="poly-row">
+              <span class="label">Layer B</span>
+              <div id="polyDotsB" class="beat-indicators compact"></div>
+            </div>
+          </div>
+          <div class="rhythm-map">
+            <div class="label">Rhythm Map</div>
+            <div id="rhythmMapMain" class="grid-map"></div>
+            <div id="rhythmMapPoly" class="grid-map small"></div>
+          </div>
+          <p class="hint">Click beats to cycle Accent / Normal / Mute. Swing & groove tweak feel.</p>
+        </div>
+      </section>
+
+      <section class="panel side" aria-label="Transport and presets">
+        <div class="start-row">
+          <button id="startStop" class="start-btn" aria-live="polite">Start</button>
+          <div>
+            <p class="label">Elapsed</p>
+            <div id="elapsedTime" class="timer">00:00:00</div>
+          </div>
+        </div>
+
+        <div class="tap-row">
+          <button id="tapTempo" class="ghost-btn">Tap Tempo</button>
+          <div class="tap-display">
+            <span class="label">Tap BPM</span>
+            <span id="tapBpm" class="tap-value">--</span>
+          </div>
+        </div>
+
+        <div class="status-cards">
+          <div class="status-card">
+            <p class="label">Setlist</p>
+            <p id="setlistStatus" class="subtext">Idle</p>
+          </div>
+          <div class="status-card">
+            <p class="label">Trainer</p>
+            <p id="rampStatus" class="subtext">Off</p>
+          </div>
+          <div class="status-card">
+            <p class="label">Blocks</p>
+            <p id="blockStatus" class="subtext">Off</p>
+          </div>
+        </div>
+
+        <div class="presets">
+          <div class="preset-header">
+            <div>
+              <p class="label">Presets</p>
+              <p class="subtext">Save tempo, signature, accents, subdivision, swing, training</p>
+            </div>
+            <div class="preset-form">
+              <input id="presetName" type="text" placeholder="Preset name">
+              <button id="savePreset" class="pill-btn">Save</button>
+            </div>
+          </div>
+          <ul id="presetList" class="preset-list"></ul>
+        </div>
+
+        <div class="shortcuts">
+          <p class="label">Shortcuts</p>
+          <p class="subtext">Space: Start/Stop • ↑/↓: ±1 BPM • Shift+↑/↓: ±5 BPM</p>
+        </div>
+      </section>
+    </main>
+
+    <section class="tabs" aria-label="Metronome panels">
+      <div class="tab-buttons" role="tablist">
+        <button data-tab="presets" class="active" role="tab" aria-controls="tab-presets">Presets & Setlists</button>
+        <button data-tab="trainer" role="tab" aria-controls="tab-trainer">Trainer & Blocks</button>
+        <button data-tab="poly" role="tab" aria-controls="tab-poly">Polyrhythms</button>
+        <button data-tab="games" role="tab" aria-controls="tab-games">Games</button>
+        <button data-tab="log" role="tab" aria-controls="tab-log">Log & Stats</button>
+        <button data-tab="advanced" role="tab" aria-controls="tab-advanced">Advanced Tools</button>
+        <button data-tab="settings" role="tab" aria-controls="tab-settings">Settings</button>
+        <button data-tab="patterns" role="tab" aria-controls="tab-patterns">Patterns</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-presets" role="tabpanel" tabindex="-1">
+        <div class="setlist-form">
+          <div class="row two-col">
+            <div>
+              <label class="label">Setlist Name</label>
+              <input id="setlistName" type="text" placeholder="Warm-up Routine">
+            </div>
+            <div>
+              <label class="label">Preset</label>
+              <select id="setlistPresetSelect"></select>
+            </div>
+          </div>
+          <div class="row two-col">
+            <div class="inline-group">
+              <label class="label">Duration</label>
+              <input id="setlistDurationValue" type="number" min="1" value="4">
+              <select id="setlistDurationType">
+                <option value="bars">Bars</option>
+                <option value="seconds">Seconds</option>
+              </select>
+            </div>
+            <button id="addSetlistItem" class="pill-btn">Add to Setlist</button>
+          </div>
+          <div class="setlist-actions">
+            <select id="setlistSelect"></select>
+            <button id="newSetlist" class="ghost-btn small">New</button>
+            <button id="deleteSetlist" class="ghost-btn small">Delete</button>
+            <button id="playSetlist" class="pill-btn">Play Setlist</button>
+            <button id="stopSetlist" class="ghost-btn small">Stop</button>
+          </div>
+          <ul id="setlistItems" class="preset-list compact"></ul>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-trainer" role="tabpanel" tabindex="-1">
+        <div class="trainer-grid">
+          <div class="trainer-card">
+            <h3>Tempo Ramp Trainer</h3>
+            <div class="row two-col">
+              <div><label class="label">Start BPM</label><input id="rampStart" type="number" value="100"></div>
+              <div><label class="label">End BPM</label><input id="rampEnd" type="number" value="140"></div>
+            </div>
+            <div class="row two-col">
+              <div><label class="label">Step Δ</label><input id="rampStep" type="number" value="2"></div>
+              <div class="inline-group">
+                <label class="label">Interval</label>
+                <input id="rampInterval" type="number" value="4" min="1">
+                <select id="rampMode">
+                  <option value="bars">Bars</option>
+                  <option value="seconds">Seconds</option>
+                </select>
+              </div>
+            </div>
+            <div class="inline-group">
+              <input id="rampEnable" type="checkbox">
+              <span>Enable ramp while playing</span>
+            </div>
+            <p id="rampInfo" class="subtext">Ready</p>
+          </div>
+
+          <div class="trainer-card">
+            <h3>Tempo Blocks</h3>
+            <div class="row two-col">
+              <div><label class="label">BPM</label><input id="blockBpm" type="number" value="110"></div>
+              <div class="inline-group">
+                <label class="label">Duration</label>
+                <input id="blockDuration" type="number" value="4">
+                <select id="blockType">
+                  <option value="bars">Bars</option>
+                  <option value="seconds">Seconds</option>
+                </select>
+              </div>
+            </div>
+            <div><label class="label">Label</label><input id="blockLabel" type="text" placeholder="Scales"></div>
+            <div class="row two-col">
+              <button id="addBlock" class="pill-btn">Add Block</button>
+              <div class="inline-group"><input id="blockToggle" type="checkbox"><span>Sequence on</span></div>
+            </div>
+            <ul id="blockList" class="preset-list compact"></ul>
+            <p id="blockInfo" class="subtext">Inactive</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-poly" role="tabpanel" tabindex="-1">
+        <div class="poly-controls">
+          <div class="inline-group">
+            <input id="polyToggle" type="checkbox">
+            <span>Enable polyrhythm</span>
+          </div>
+          <div class="row two-col">
+            <div>
+              <label class="label">Ratio</label>
+              <select id="polyRatio">
+                <option value="2:3">2 : 3</option>
+                <option value="3:2">3 : 2</option>
+                <option value="3:4">3 : 4</option>
+                <option value="5:4">5 : 4</option>
+                <option value="7:3">7 : 3</option>
+              </select>
+            </div>
+            <div class="inline-group">
+              <label class="label">Layer A Vol</label>
+              <input id="polyVolA" type="range" min="0" max="1" step="0.01">
+            </div>
+            <div class="inline-group">
+              <label class="label">Layer B Vol</label>
+              <input id="polyVolB" type="range" min="0" max="1" step="0.01">
+            </div>
+          </div>
+          <div class="row two-col">
+            <div>
+              <label class="label">Layer A Sound</label>
+              <select id="polySoundA">
+                <option value="woodblock">Woodblock</option>
+                <option value="beep">Beep</option>
+              </select>
+            </div>
+            <div>
+              <label class="label">Layer B Sound</label>
+              <select id="polySoundB">
+                <option value="woodblock">Woodblock</option>
+                <option value="beep">Beep</option>
+              </select>
+            </div>
+          </div>
+          <p class="subtext">Two layers run over the same bar length. Watch the dual dots above.</p>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-log" role="tabpanel" tabindex="-1">
+        <div class="log-grid">
+          <div>
+            <h3>Practice Log</h3>
+            <ul id="sessionLog" class="log-list"></ul>
+          </div>
+          <div>
+            <h3>Stats</h3>
+            <div class="stats">
+              <div class="stat-card"><p class="label">Today</p><p id="statToday" class="stat-value">--</p></div>
+              <div class="stat-card"><p class="label">Last 7 Days</p><p id="stat7" class="stat-value">--</p></div>
+              <div class="stat-card"><p class="label">Last 30 Days</p><p id="stat30" class="stat-value">--</p></div>
+            </div>
+            <div class="charts">
+              <h4>Practice Time (30 days)</h4>
+              <svg id="practiceChart" role="img" aria-label="Practice minutes last 30 days" width="100%" height="160"></svg>
+              <h4>Timing Accuracy</h4>
+              <svg id="timingChart" role="img" aria-label="Timing errors scatter" width="100%" height="160"></svg>
+            </div>
+            <div class="coach">
+              <h4>Adaptive Tempo Coach</h4>
+              <button id="coachTap" class="pill-btn">Tap with the beat</button>
+              <p id="coachFeedback" class="subtext">Waiting for taps...</p>
+              <div class="coach-actions">
+                <button id="nudgeDown" class="ghost-btn small">-1 BPM</button>
+                <button id="nudgeUp" class="ghost-btn small">+1 BPM</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-advanced" role="tabpanel" tabindex="-1">
+        <div class="advanced-grid">
+          <div class="advanced-card">
+            <h3>Mood to Tempo</h3>
+            <select id="moodSelect">
+              <option value="Calm">Calm</option>
+              <option value="Focused">Focused</option>
+              <option value="Energetic">Energetic</option>
+              <option value="Nervous Performance">Nervous Performance</option>
+              <option value="Warm-up">Warm-up</option>
+            </select>
+            <p id="moodSuggestion" class="subtext"></p>
+            <button id="applyMood" class="pill-btn">Apply Suggestion</button>
+          </div>
+
+          <div class="advanced-card">
+            <h3>Silent Bars & Phrase Pings</h3>
+            <div class="inline-group">
+              <input id="silentBarsToggle" type="checkbox">
+              <label for="silentBarsToggle">Every</label>
+              <input id="silentBarsEvery" type="number" value="4" min="2">
+              <span class="subtext">bar silent</span>
+            </div>
+            <div class="inline-group">
+              <input id="phraseToggle" type="checkbox">
+              <label for="phraseToggle">Phrase length</label>
+              <input id="phraseLength" type="number" value="4" min="2">
+              <span class="subtext">bars</span>
+            </div>
+            <div class="inline-group">
+              <label class="label">Target phrases</label>
+              <input id="phraseTarget" type="number" value="0" min="0">
+            </div>
+            <p id="phraseStatus" class="subtext">Pings at start of each phrase.</p>
+          </div>
+
+          <div class="advanced-card">
+            <h3>Warm-up Generator</h3>
+            <button id="generateWarmup" class="pill-btn">Generate today</button>
+            <button id="regenWarmup" class="ghost-btn small">Regenerate</button>
+            <ul id="warmupList" class="preset-list compact"></ul>
+          </div>
+
+          <div class="advanced-card">
+            <h3>Export / Import</h3>
+            <div class="row two-col">
+              <button id="exportData" class="pill-btn">Export JSON</button>
+              <button id="importData" class="ghost-btn small">Import JSON</button>
+            </div>
+            <textarea id="dataArea" rows="6" placeholder="Paste data to import"></textarea>
+            <button id="confirmImport" class="pill-btn small">Confirm Import</button>
+            <p id="importError" class="subtext danger" aria-live="polite"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-games" role="tabpanel" tabindex="-1">
+        <div class="games-grid">
+          <div class="advanced-card">
+            <h3>Hit the Beat</h3>
+            <p class="subtext">Tap space or clap on each beat. Score based on timing accuracy.</p>
+            <div class="inline-group">
+              <label class="label">Duration (sec)</label>
+              <input id="gameHitDuration" type="number" min="10" max="90" value="45">
+              <button id="startGameHit" class="pill-btn small">Start</button>
+            </div>
+            <p id="gameHitStatus" class="subtext">Idle</p>
+          </div>
+          <div class="advanced-card">
+            <h3>Silent Bars</h3>
+            <p class="subtext">Keep tapping during silence; see how close you stay.</p>
+            <div class="inline-group">
+              <label class="label">Lead bars</label>
+              <input id="gameSilentLead" type="number" min="1" max="8" value="2">
+              <label class="label">Silent bars</label>
+              <input id="gameSilentBars" type="number" min="1" max="8" value="2">
+              <button id="startGameSilent" class="pill-btn small">Start</button>
+            </div>
+            <p id="gameSilentStatus" class="subtext">Idle</p>
+          </div>
+          <div class="advanced-card">
+            <h3>Copy the Pattern</h3>
+            <p class="subtext">Listen to a short rhythm, then tap it back.</p>
+            <div class="inline-group">
+              <label class="label">Pattern</label>
+              <select id="gameCopyPattern">
+                <option value="clave">Son Clave</option>
+                <option value="sync">Syncopation</option>
+                <option value="off">Off-beat 8ths</option>
+              </select>
+              <button id="startGameCopy" class="pill-btn small">Start</button>
+            </div>
+            <p id="gameCopyStatus" class="subtext">Idle</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-patterns" role="tabpanel" tabindex="-1">
+        <div class="patterns-grid">
+          <div class="advanced-card">
+            <h3>Pattern Editor</h3>
+            <div class="row two-col">
+              <div><label class="label">Name</label><input id="patternName" type="text"></div>
+              <div><label class="label">Time Sig</label>
+                <select id="patternSig">
+                  <option value="4/4">4/4</option>
+                  <option value="3/4">3/4</option>
+                  <option value="6/8">6/8</option>
+                </select>
+              </div>
+            </div>
+            <div class="row two-col">
+              <div><label class="label">Subdivision</label>
+                <select id="patternSubdivision">
+                  <option value="8">8th</option>
+                  <option value="16" selected>16th</option>
+                </select>
+              </div>
+              <button id="newPattern" class="ghost-btn small">New</button>
+            </div>
+            <div id="patternGrid" class="pattern-grid" role="grid" aria-label="Pattern steps"></div>
+            <div class="inline-group">
+              <button id="savePattern" class="pill-btn small">Save</button>
+              <button id="deletePattern" class="ghost-btn small">Delete</button>
+              <button id="previewPattern" class="ghost-btn small">Preview</button>
+            </div>
+          </div>
+          <div class="advanced-card">
+            <h3>Pattern Library</h3>
+            <p class="subtext">Use patterns in games and metronome playback (coming in later stage).</p>
+            <ul id="patternList" class="preset-list compact"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-settings" role="tabpanel" tabindex="-1">
+        <div class="advanced-grid">
+        <div class="advanced-card">
+          <h3>Latency Calibration</h3>
+          <p class="subtext">Tap when you hear the click to measure device latency.</p>
+          <div class="row two-col">
+            <button id="startCalibration" class="pill-btn">Start calibration</button>
+            <button id="tapCalibration" class="ghost-btn small">Tap when you hear it</button>
+          </div>
+          <p class="subtext">Measured: <span id="latencyMeasured">0 ms</span></p>
+          <label class="label">Manual adjust</label>
+          <div class="slider-row">
+            <input id="latencyAdjust" type="range" min="-30" max="30" step="1">
+            <span id="latencyApplied" class="chip">0 ms</span>
+          </div>
+        </div>
+
+        <div class="advanced-card">
+          <h3>Profiles</h3>
+          <div class="inline-group wrap">
+            <label class="label">Active Profile</label>
+            <select id="profileSelect"></select>
+            <input id="profileInstrument" type="text" placeholder="Instrument (optional)">
+          </div>
+          <div class="inline-group">
+            <button id="addProfile" class="pill-btn small">Add</button>
+            <button id="renameProfile" class="ghost-btn small">Rename</button>
+            <button id="deleteProfile" class="ghost-btn small">Delete</button>
+          </div>
+          <p class="subtext">Profiles keep separate presets, logs, patterns, and settings.</p>
+        </div>
+
+        <div class="advanced-card">
+          <h3>Audio Input Training</h3>
+          <p class="subtext">Enable mic to analyze claps/taps locally. Nothing leaves your browser.</p>
+          <div class="inline-group">
+            <button id="micToggle" class="pill-btn small">Enable mic</button>
+              <span id="micStatus" class="subtext">Mic idle</span>
+            </div>
+            <p class="subtext">Peaks detected while running will be compared to the metronome for timing reports.</p>
+          </div>
+
+          <div class="advanced-card" id="midiCard">
+            <h3>MIDI</h3>
+            <p class="subtext" id="midiStatus">Checking MIDI...</p>
+            <label class="label">Input</label>
+            <select id="midiInputSelect"></select>
+            <div class="row two-col">
+              <div>
+                <label class="label">Tap Note</label>
+                <input id="midiTapNote" type="number" min="0" max="127" value="60">
+              </div>
+              <div>
+                <label class="label">Start/Stop Note</label>
+                <input id="midiTransportNote" type="number" min="0" max="127" value="62">
+              </div>
+            </div>
+            <button id="applyMidi" class="pill-btn small">Apply MIDI mapping</button>
+            <p class="subtext" id="midiMappingInfo"></p>
+          </div>
+
+          <div class="advanced-card">
+            <h3>Helper & Debug</h3>
+            <div class="inline-group">
+              <input id="showHelper" type="checkbox">
+              <span>Show quick start guide on load</span>
+            </div>
+            <div class="inline-group">
+              <input id="debugToggle" type="checkbox">
+              <span>Enable debug panel</span>
+            </div>
+            <div id="debugPanel" class="debug-panel" hidden>
+              <p class="label">Timing</p>
+              <pre id="debugTiming"></pre>
+              <p class="label">Upcoming Beats</p>
+              <pre id="debugBeats"></pre>
+              <p class="label">State</p>
+              <pre id="debugState"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="helperOverlay" class="helper-overlay" aria-hidden="true">
+    <div class="helper-card" role="dialog" aria-modal="true" aria-label="Quick start guide">
+      <h3>Quick Start</h3>
+      <ol>
+        <li>Set BPM and time signature on the left.</li>
+        <li>Press Start or hit Space to begin.</li>
+        <li>Use tabs for trainers, logs, MIDI, and export.</li>
+      </ol>
+      <div class="inline-group">
+        <input id="helperDontShow" type="checkbox">
+        <span>Don’t show again</span>
+      </div>
+      <button id="closeHelper" class="pill-btn">Got it</button>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
