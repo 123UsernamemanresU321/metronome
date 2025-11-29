@@ -243,7 +243,6 @@ export default class Metronome {
           this.polyState = {
             bar: barIndex,
             start: barStartTime,
-            end: barStartTime + this.beatsPerBar * beatDuration,
             intervalA: barDuration / validA,
             intervalB: barDuration / validB,
             nextA: barStartTime,
@@ -287,7 +286,6 @@ export default class Metronome {
         }
       }
 
-      // Polyrhythm layers
       if (typeof this.onTick === 'function') {
         this.onTick({ layer: 'main', beat: beatInBar, bar: barIndex, time: this.nextNoteTime, countIn: isCountIn });
       }
@@ -306,7 +304,7 @@ export default class Metronome {
       }
     }
 
-    // Always schedule polyrhythm layers to the same horizon, even if no main beats land in the window.
+    // Polyrhythm layers: schedule independently of main-beat loop so we never miss mid-beat clicks.
     if (this.polyrhythm.enabled && this.polyState.intervalA && this.polyState.intervalB) {
       this._schedulePolyrhythmLayer('A', horizon, playAudio);
       this._schedulePolyrhythmLayer('B', horizon, playAudio);
@@ -322,11 +320,11 @@ export default class Metronome {
     const gainScale = isA ? this.polyrhythm.volumeA : this.polyrhythm.volumeB;
     const ctx = this.audioCtx;
 
-    const start = this.polyState.start || ctx.currentTime;
+    // Catch up only enough to avoid scheduling in the past.
+    const now = ctx.currentTime;
+    const start = this.polyState.start || now;
     const barEnd = this.polyState.end || start + this.beatsPerBar * (60 / this.bpm);
-
-    // Catch up just enough so we don't schedule in the past, but without skipping future hits.
-    while (next + 0.0005 < ctx.currentTime) {
+    while (next + 0.0005 < now) {
       next += interval;
     }
 
