@@ -243,6 +243,7 @@ export default class Metronome {
           this.polyState = {
             bar: barIndex,
             start: barStartTime,
+            end: barStartTime + barDuration,
             intervalA: barDuration / validA,
             intervalB: barDuration / validB,
             nextA: barStartTime,
@@ -323,7 +324,9 @@ export default class Metronome {
     // Catch up only enough to avoid scheduling in the past.
     const now = ctx.currentTime;
     const start = this.polyState.start || now;
-    const barEnd = this.polyState.end || start + this.beatsPerBar * (60 / this.bpm);
+    const barEnd =
+      this.polyState.end ||
+      start + this.beatsPerBar * ((60 / this.bpm) * (4 / this.beatUnit || 4));
     while (next + 0.0005 < now) {
       next += interval;
     }
