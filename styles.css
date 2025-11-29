@@ -509,6 +509,15 @@ input[type='range'] {
   flex-wrap: wrap;
 }
 
+.custom-time {
+  display: none;
+  margin-top: 6px;
+}
+
+.custom-time.active {
+  display: flex;
+}
+
 .slider-row {
   display: flex;
   align-items: center;
