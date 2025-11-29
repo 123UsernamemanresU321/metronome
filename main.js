@@ -356,6 +356,8 @@ function applySettingsToUI() {
     const [num, den] = s.timeSignature.split('/').map((n) => parseInt(n, 10));
     elements.customTimeNum.value = num || 4;
     elements.customTimeDen.value = den || 4;
+    const customRow = document.getElementById('customTimeControls');
+    if (customRow) customRow.classList.toggle('active', elements.timeSignature.value === 'custom');
   }
   elements.subdivision.value = s.subdivision;
   elements.soundSelect.value = s.sound;
@@ -406,6 +408,12 @@ function saveSettingsNow() {
 
 function clampBpm(bpm) {
   return Math.min(Math.max(Math.round(bpm), 1), 600);
+}
+
+function beatDurationMs(sig, bpm) {
+  const [, denRaw] = (sig || '4/4').split('/');
+  const den = parseInt(denRaw, 10) || 4;
+  return (60000 / bpm) * (4 / den);
 }
 
 function normalizeAccents() {
@@ -459,6 +467,8 @@ function setTimeSignature(sig) {
   buildBeatIndicators();
   buildSubdivisionPatternUI();
   renderRhythmMap();
+  const customRow = document.getElementById('customTimeControls');
+  if (customRow) customRow.classList.toggle('active', sig === 'custom');
   saveSettingsNow();
 }
 
