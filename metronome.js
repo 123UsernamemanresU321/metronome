@@ -238,8 +238,8 @@ export default class Metronome {
         // Prepare polyrhythm schedule for the upcoming bar.
         if (this.polyrhythm.enabled) {
           const barDuration = this.beatsPerBar * beatDuration;
-          const validA = Math.max(1, parseInt(this.polyrhythm.ratioA, 10) || 1);
-          const validB = Math.max(1, parseInt(this.polyrhythm.ratioB, 10) || 1);
+          const validA = Math.max(1, parseFloat(this.polyrhythm.ratioA) || 1);
+          const validB = Math.max(1, parseFloat(this.polyrhythm.ratioB) || 1);
           this.polyState = {
             bar: barIndex,
             start: barStartTime,
@@ -320,6 +320,14 @@ export default class Metronome {
     const sound = isA ? this.polyrhythm.soundA : this.polyrhythm.soundB;
     const gainScale = isA ? this.polyrhythm.volumeA : this.polyrhythm.volumeB;
     const ctx = this.audioCtx;
+
+    // Catch up if we fell behind the current bar time due to lookahead windows.
+    const start = this.polyState.start || ctx.currentTime;
+    if (next < start) next = start;
+    if (next < ctx.currentTime - interval) {
+      const stepsBehind = Math.ceil((ctx.currentTime - start) / interval);
+      next = start + stepsBehind * interval;
+    }
 
     const cutoff = Math.min(horizon, barEnd + 0.0005);
     while (next < cutoff) {
