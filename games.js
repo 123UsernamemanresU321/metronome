@@ -42,7 +42,7 @@ export class GamesController {
       leadBeats: leadBars * beatsPerBar,
       silentBeats: silentBars * beatsPerBar,
       totalBeats,
-      startTime: null,
+      startTimeMs: null,
       beatDur,
       beatsPerBar,
       taps: [],
@@ -73,8 +73,8 @@ export class GamesController {
     if (!this.active) return;
     if (this.active === GAME_MODES.SILENT) {
       const s = this.state;
-      if (!s.startTime) s.startTime = time;
-      const beatIndex = Math.round((time - s.startTime) / s.beatDur);
+      if (!s.startTimeMs) s.startTimeMs = time;
+      const beatIndex = Math.round((time - s.startTimeMs) / s.beatDur);
       if (beatIndex >= s.totalBeats) {
         this._finishSilent();
       }
@@ -123,8 +123,8 @@ export class GamesController {
 
   _scoreSilent(timeMs) {
     const s = this.state;
-    if (!s.startTime) return;
-    const beatIndex = Math.round((timeMs - s.startTime * 1000) / (s.beatDur));
+    if (!s.startTimeMs) return;
+    const beatIndex = Math.round((timeMs - s.startTimeMs) / s.beatDur);
     s.taps.push({ beatIndex, timeMs });
     if (beatIndex >= s.totalBeats) this._finishSilent();
   }
@@ -134,7 +134,7 @@ export class GamesController {
     const errors = s.taps
       .filter((t) => t.beatIndex >= s.leadBeats)
       .map((t) => {
-        const expected = s.startTime * 1000 + t.beatIndex * s.beatDur;
+        const expected = s.startTimeMs + t.beatIndex * s.beatDur;
         return t.timeMs - expected;
       });
     const spread = errors.length ? errors.reduce((a, b) => a + Math.abs(b), 0) / errors.length : 0;
