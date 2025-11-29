@@ -1373,7 +1373,7 @@ function handleCountIn() {
 
 function handlePolyrhythmChange() {
   const ratio = (elements.polyRatio.value || '3:2').trim();
-  const parts = ratio.split(':').map((n) => parseInt(n, 10));
+  const parts = ratio.split(':').map((n) => parseFloat(n));
   const a = Math.max(1, parts[0] || 3);
   const b = Math.max(1, parts[1] || 2);
   elements.polyRatio.value = `${a}:${b}`;
