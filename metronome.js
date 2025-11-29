@@ -23,6 +23,7 @@ export default class Metronome {
 
     this.bpm = 120;
     this.beatsPerBar = 4;
+    this.beatUnit = 4;
     this.timeSignature = '4/4';
     this.beatAccents = ['accent', 'normal', 'normal', 'normal'];
     this.subdivision = 'none';
@@ -81,6 +82,7 @@ export default class Metronome {
     this.currentBeat = 0;
     this.countInRemaining = this.countInBars;
     this.isCountingIn = this.countInBars > 0;
+    this._resetPolyState();
     this.nextNoteTime = this.audioCtx.currentTime + 0.05; // small offset so first beat schedules cleanly
     this.timerId = setInterval(() => this._scheduler(), this.lookahead * 1000);
     this._scheduler(); // prime the scheduler immediately
@@ -101,7 +103,9 @@ export default class Metronome {
   setTimeSignature(signature) {
     this.timeSignature = signature;
     const beats = parseInt(signature.split('/')[0], 10) || 4;
+    const unit = parseInt(signature.split('/')[1], 10) || 4;
     this.beatsPerBar = beats;
+    this.beatUnit = unit;
     if (!Array.isArray(this.beatAccents)) {
       this.beatAccents = [];
     }
@@ -192,6 +196,11 @@ export default class Metronome {
 
   setPolyrhythm(config) {
     this.polyrhythm = { ...this.polyrhythm, ...config };
+    this._resetPolyState();
+  }
+
+  _resetPolyState() {
+    this.polyState = { intervalA: 0, intervalB: 0, nextA: 0, nextB: 0, bar: -1, start: 0 };
   }
 
   _scheduler() {
@@ -199,7 +208,7 @@ export default class Metronome {
 
     const ctx = this.audioCtx;
     const horizon = ctx.currentTime + this.scheduleAheadTime;
-    const beatDuration = 60 / this.bpm;
+    const beatDuration = (60 / this.bpm) * (4 / this.beatUnit);
 
     // Schedule notes slightly ahead of the current time to keep steady timing.
     while (this.nextNoteTime < horizon) {
@@ -229,11 +238,13 @@ export default class Metronome {
         // Prepare polyrhythm schedule for the upcoming bar.
         if (this.polyrhythm.enabled) {
           const barDuration = this.beatsPerBar * beatDuration;
+          const validA = Math.max(1, parseInt(this.polyrhythm.ratioA, 10) || 1);
+          const validB = Math.max(1, parseInt(this.polyrhythm.ratioB, 10) || 1);
           this.polyState = {
             bar: barIndex,
             start: barStartTime,
-            intervalA: barDuration / this.polyrhythm.ratioA,
-            intervalB: barDuration / this.polyrhythm.ratioB,
+            intervalA: barDuration / validA,
+            intervalB: barDuration / validB,
             nextA: barStartTime,
             nextB: barStartTime,
           };
@@ -276,9 +287,10 @@ export default class Metronome {
       }
 
       // Polyrhythm layers
+      const barEnd = barStartTime + this.beatsPerBar * beatDuration;
       if (this.polyrhythm.enabled) {
-        this._schedulePolyrhythmLayer('A', horizon, playAudio);
-        this._schedulePolyrhythmLayer('B', horizon, playAudio);
+        this._schedulePolyrhythmLayer('A', horizon, barEnd, playAudio);
+        this._schedulePolyrhythmLayer('B', horizon, barEnd, playAudio);
       }
 
       if (typeof this.onTick === 'function') {
@@ -300,18 +312,19 @@ export default class Metronome {
     }
   }
 
-  _schedulePolyrhythmLayer(layerKey, horizon, playAudio) {
+  _schedulePolyrhythmLayer(layerKey, horizon, barEnd, playAudio) {
     const isA = layerKey === 'A';
     const interval = isA ? this.polyState.intervalA : this.polyState.intervalB;
-    if (!interval || interval <= 0) return;
+    if (!interval || interval <= 0 || Number.isNaN(interval)) return;
     let next = isA ? this.polyState.nextA : this.polyState.nextB;
     const sound = isA ? this.polyrhythm.soundA : this.polyrhythm.soundB;
     const gainScale = isA ? this.polyrhythm.volumeA : this.polyrhythm.volumeB;
     const ctx = this.audioCtx;
 
-    while (next < horizon) {
+    const cutoff = Math.min(horizon, barEnd + 0.0005);
+    while (next < cutoff) {
       if (playAudio) {
-        const scheduleTime = Math.max(ctx.currentTime + 0.001, next - this.latencyOffset + this._jitter());
+        const scheduleTime = Math.max(ctx.currentTime + 0.001, next - this.latencyOffset);
         this._scheduleClick(scheduleTime, true, false, { sound, gainScale });
       }
       if (typeof this.onPolyTick === 'function') {
