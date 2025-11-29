@@ -43,6 +43,8 @@ const DEFAULT_SETTINGS = {
   subdivisionPattern: {
     eighth: ['accent', 'normal'],
     triplet: ['accent', 'normal', 'normal'],
+    sixteenth: ['accent', 'normal', 'normal', 'normal'],
+    quintuplet: ['accent', 'normal', 'normal', 'normal', 'normal'],
   },
   swing: 0,
   sound: 'woodblock',
@@ -120,6 +122,8 @@ const elements = {
   bpmDown: document.getElementById('bpmDown'),
   bpmError: document.getElementById('bpmError'),
   timeSignature: document.getElementById('timeSignature'),
+  customTimeNum: document.getElementById('customTimeNum'),
+  customTimeDen: document.getElementById('customTimeDen'),
   subdivision: document.getElementById('subdivision'),
   beatIndicators: document.getElementById('beatIndicators'),
   pulse: document.getElementById('pulse'),
@@ -298,7 +302,7 @@ function normalizeSettings(settings) {
   merged.trainer.ramp = { ...DEFAULT_SETTINGS.trainer.ramp, ...((settings.trainer && settings.trainer.ramp) || {}) };
   merged.trainer.blocks = settings.trainer && settings.trainer.blocks ? settings.trainer.blocks : [];
   merged.trainer.blocksEnabled = settings.trainer && typeof settings.trainer.blocksEnabled === 'boolean' ? settings.trainer.blocksEnabled : false;
-  merged.subdivisionPattern = settings.subdivisionPattern || DEFAULT_SETTINGS.subdivisionPattern;
+  merged.subdivisionPattern = { ...DEFAULT_SETTINGS.subdivisionPattern, ...(settings.subdivisionPattern || {}) };
   merged.latency = { ...DEFAULT_SETTINGS.latency, ...(settings.latency || {}) };
   merged.midi = { ...DEFAULT_SETTINGS.midi, ...(settings.midi || {}) };
   merged.helperSeen = !!settings.helperSeen;
@@ -345,6 +349,14 @@ function applySettingsToUI() {
   const s = state.settings;
   updateBpmUI(s.bpm);
   elements.timeSignature.value = s.timeSignature;
+  if (!Array.from(elements.timeSignature.options).some((o) => o.value === s.timeSignature)) {
+    elements.timeSignature.value = 'custom';
+  }
+  if (elements.customTimeNum && elements.customTimeDen) {
+    const [num, den] = s.timeSignature.split('/').map((n) => parseInt(n, 10));
+    elements.customTimeNum.value = num || 4;
+    elements.customTimeDen.value = den || 4;
+  }
   elements.subdivision.value = s.subdivision;
   elements.soundSelect.value = s.sound;
   elements.volume.value = s.volume;
@@ -393,7 +405,7 @@ function saveSettingsNow() {
 }
 
 function clampBpm(bpm) {
-  return Math.min(Math.max(Math.round(bpm), 20), 300);
+  return Math.min(Math.max(Math.round(bpm), 1), 600);
 }
 
 function normalizeAccents() {
@@ -412,8 +424,8 @@ function updateBpmUI(bpm) {
 
 function setBpmFromInput(value) {
   const bpm = clampBpm(Number(value) || state.settings.bpm);
-  if (value < 20 || value > 300) {
-    setErrorText(elements.bpmError, 'BPM clamped to 20–300');
+  if (value < 1 || value > 600) {
+    setErrorText(elements.bpmError, 'BPM clamped to 1–600');
   } else {
     setErrorText(elements.bpmError, '');
   }
@@ -429,13 +441,20 @@ function changeBpm(delta) {
 }
 
 function setTimeSignature(sig) {
-  state.settings.timeSignature = sig;
-  const beats = parseInt(sig.split('/')[0], 10) || 4;
+  let nextSig = sig;
+  if (sig === 'custom' && elements.customTimeNum && elements.customTimeDen) {
+    const num = Math.max(1, parseInt(elements.customTimeNum.value, 10) || 4);
+    const den = Math.max(1, parseInt(elements.customTimeDen.value, 10) || 4);
+    nextSig = `${num}/${den}`;
+    if (elements.timeSignature) elements.timeSignature.value = 'custom';
+  }
+  state.settings.timeSignature = nextSig;
+  const beats = parseInt(nextSig.split('/')[0], 10) || 4;
   const accents = (state.settings.beatAccents || []).slice(0, beats);
   while (accents.length < beats) accents.push('normal');
   if (accents[0] !== 'accent') accents[0] = 'accent';
   state.settings.beatAccents = accents;
-  metronome.setTimeSignature(sig);
+  metronome.setTimeSignature(nextSig);
   metronome.setBeatAccents(accents);
   buildBeatIndicators();
   buildSubdivisionPatternUI();
@@ -536,8 +555,11 @@ function buildSubdivisionPatternUI() {
     container.textContent = 'No subdivision';
     return;
   }
-  const count = type === 'eighth' ? 2 : type === 'triplet' ? 3 : 0;
+  const count = type === 'eighth' ? 2 : type === 'triplet' ? 3 : type === 'sixteenth' ? 4 : type === 'quintuplet' ? 5 : 0;
   const pattern = (state.settings.subdivisionPattern && state.settings.subdivisionPattern[type]) || [];
+  while (pattern.length < count) {
+    pattern.push(pattern.length === 0 ? 'accent' : 'normal');
+  }
   for (let i = 0; i < count; i += 1) {
     const btn = document.createElement('button');
     btn.className = `beat-dot compact ${pattern[i] || 'normal'}`;
@@ -555,7 +577,7 @@ function buildSubdivisionPatternUI() {
   }
 }
 
-function handleTick({ layer, beat, bar, countIn }) {
+function handleTick({ layer, beat, bar, countIn, time }) {
   if (layer === 'main') {
     state.barCounter = bar;
     const dots = elements.beatIndicators.querySelectorAll('.beat-dot');
@@ -566,6 +588,7 @@ function handleTick({ layer, beat, bar, countIn }) {
       elements.pulse.classList.add('active');
     }
     renderRhythmMap(beat, countIn);
+    games.onBeat((time || metronome.nextNoteTime) * 1000);
   }
 }
 
@@ -1030,8 +1053,10 @@ function renderBlocks() {
 }
 
 function renderPolyrhythmDots() {
-  const ratio = elements.polyRatio.value || '3:2';
-  const [a, b] = ratio.split(':').map((n) => parseInt(n, 10));
+  const ratio = (elements.polyRatio.value || '3:2').trim();
+  const parts = ratio.split(':').map((n) => parseInt(n, 10));
+  const a = Math.max(1, parts[0] || 3);
+  const b = Math.max(1, parts[1] || 2);
   const makeDots = (container, count) => {
     if (!container) return;
     container.innerHTML = '';
@@ -1069,7 +1094,6 @@ function handleBar(info) {
   handleSetlistProgress(info);
   trainer.onBar(info);
   updatePhraseStatus(info);
-  games.onBeat(info.time * 1000);
   if (state.calibration.active) updateCalibrationWithBeat(info);
   updateDebug();
 }
@@ -1077,7 +1101,16 @@ function handleBar(info) {
 function renderRhythmMap(activeBeat = null, countIn = false) {
   const beats = parseInt(state.settings.timeSignature.split('/')[0], 10) || 4;
   const subdivision = state.settings.subdivision;
-  const subCount = subdivision === 'eighth' ? 2 : subdivision === 'triplet' ? 3 : 1;
+  const subCount =
+    subdivision === 'eighth'
+      ? 2
+      : subdivision === 'triplet'
+      ? 3
+      : subdivision === 'sixteenth'
+      ? 4
+      : subdivision === 'quintuplet'
+      ? 5
+      : 1;
   const container = elements.rhythmMapMain;
   if (!container) return;
   container.innerHTML = '';
@@ -1329,8 +1362,11 @@ function handleCountIn() {
 }
 
 function handlePolyrhythmChange() {
-  const ratio = elements.polyRatio.value || '3:2';
-  const [a, b] = ratio.split(':').map((n) => parseInt(n, 10));
+  const ratio = (elements.polyRatio.value || '3:2').trim();
+  const parts = ratio.split(':').map((n) => parseInt(n, 10));
+  const a = Math.max(1, parts[0] || 3);
+  const b = Math.max(1, parts[1] || 2);
+  elements.polyRatio.value = `${a}:${b}`;
   state.settings.polyrhythm.enabled = elements.polyToggle.checked;
   state.settings.polyrhythm.ratioA = a;
   state.settings.polyrhythm.ratioB = b;
@@ -1792,10 +1828,18 @@ function updateCalibrationWithBeat(info) {
 function tapCalibration() {
   if (!state.calibration.active) return;
   const beats = metronome.getRecentBeats();
-  const latest = beats[beats.length - 1];
-  if (!latest) return;
+  if (!beats.length) return;
   const audioTime = metronome.audioCtx.currentTime;
-  const diffMs = (audioTime - latest.time) * 1000;
+  let nearest = beats[0];
+  let minDiff = Math.abs(audioTime - beats[0].time);
+  beats.forEach((b) => {
+    const diff = Math.abs(audioTime - b.time);
+    if (diff < minDiff) {
+      minDiff = diff;
+      nearest = b;
+    }
+  });
+  const diffMs = (audioTime - nearest.time) * 1000;
   state.calibration.taps.push(diffMs);
   if (state.calibration.taps.length >= 20) finishCalibration();
   elements.audioStatus.textContent = `Captured ${state.calibration.taps.length}/20 taps`;
@@ -1976,6 +2020,8 @@ function attachEventListeners() {
   elements.bpmUp.addEventListener('click', () => changeBpm(1));
   elements.bpmDown.addEventListener('click', () => changeBpm(-1));
   elements.timeSignature.addEventListener('change', (e) => setTimeSignature(e.target.value));
+  elements.customTimeNum?.addEventListener('change', () => setTimeSignature('custom'));
+  elements.customTimeDen?.addEventListener('change', () => setTimeSignature('custom'));
   elements.subdivision.addEventListener('change', (e) => setSubdivision(e.target.value));
   elements.soundSelect.addEventListener('change', (e) => setSound(e.target.value));
   elements.volume.addEventListener('input', (e) => setVolume(e.target.value));
@@ -2105,16 +2151,19 @@ function attachEventListeners() {
   elements.startGameHit.addEventListener('click', () => {
     games.startHit(Number(elements.gameHitDuration.value) || 45);
     state.lastGameResult = null;
+    if (!state.isRunning) toggleStartStop();
   });
   elements.startGameSilent.addEventListener('click', () => {
     games.startSilent(Number(elements.gameSilentLead.value) || 2, Number(elements.gameSilentBars.value) || 2);
     state.lastGameResult = null;
+    if (!state.isRunning) toggleStartStop();
   });
   elements.startGameCopy.addEventListener('click', () => {
     const pid = elements.gameCopyPattern.value;
     const pattern = state.patterns.find((p) => p.id === pid);
     games.startCopy(pattern || pid);
     state.lastGameResult = null;
+    if (!state.isRunning) toggleStartStop();
   });
   if (elements.newPattern) {
     elements.newPattern.addEventListener('click', () => {
