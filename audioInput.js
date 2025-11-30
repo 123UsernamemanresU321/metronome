@@ -2,11 +2,13 @@
 // It tracks a smoothed baseline level and emits onsets when the short-term energy
 // crosses a dynamic threshold and respects a refractory window.
 const DEFAULT_OPTIONS = {
-  minInterval: 0.1, // seconds between onsets to avoid double triggers
-  thresholdFactor: 3, // multiplier over baseline energy
+  minInterval: 0.16, // seconds between onsets to avoid double triggers
+  thresholdFactor: 3.5, // multiplier over baseline energy
   smoothing: 0.995, // baseline decay; closer to 1 = slower updates
   fftSize: 1024,
   filterFrequency: 120,
+  minEnergy: 1e-6, // ignore extremely low noise floor
+  slopeFactor: 1.2, // require transient slope vs previous frame
 };
 
 export class AudioInputDetector {
@@ -24,6 +26,7 @@ export class AudioInputDetector {
     this.enabled = false;
     this.lastOnsetTime = 0;
     this.baselineEnergy = 0;
+    this.prevEnergy = 0;
   }
 
   isSupported() {
@@ -53,6 +56,7 @@ export class AudioInputDetector {
       this.enabled = true;
       this.baselineEnergy = 0;
       this.lastOnsetTime = 0;
+      this.prevEnergy = 0;
       return true;
     } catch (e) {
       this.stop();
@@ -111,6 +115,10 @@ export class AudioInputDetector {
       energy += sample * sample;
     }
     energy /= frames;
+    if (energy < this.options.minEnergy) {
+      this.prevEnergy = energy;
+      return;
+    }
 
     // Initialize baseline quickly on first frames.
     if (this.baselineEnergy === 0) this.baselineEnergy = energy;
@@ -119,12 +127,14 @@ export class AudioInputDetector {
 
     const threshold = this.baselineEnergy * this.options.thresholdFactor + 1e-7;
     const now = this.audioCtx.currentTime;
-    if (energy > threshold && now - this.lastOnsetTime > this.options.minInterval) {
+    const rising = energy > this.prevEnergy * this.options.slopeFactor;
+    if (energy > threshold && rising && now - this.lastOnsetTime > this.options.minInterval) {
       this.lastOnsetTime = now;
       this._emitOnset({ time: now, energy });
       // Raise the baseline briefly after an onset to reduce double triggers.
       this.baselineEnergy = Math.max(this.baselineEnergy, energy);
     }
+    this.prevEnergy = energy;
   }
 }
 
