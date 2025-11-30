@@ -19,6 +19,8 @@ const DEFAULTS = {
   minStatusInterval: 0.6, // seconds between status flips
   minDriftsForStatus: 2,
   noDataTimeoutMs: 8000,
+  maxIoiSeconds: 2.0, // 30 BPM floor
+  minIoiSeconds: 0.22, // ~272 BPM ceiling
 };
 
 export class TempoMonitor {
@@ -77,7 +79,7 @@ export class TempoMonitor {
       if (this.recentDrifts.length > this.options.maxDrifts) this.recentDrifts.shift();
     }
 
-    this.lastTempoEstimate = this._estimateTempo();
+    this.lastTempoEstimate = this._estimateTempo(params.bpm);
     this._evaluate(params);
   }
 
@@ -89,16 +91,29 @@ export class TempoMonitor {
     return { ...this.lastStatus };
   }
 
-  _estimateTempo() {
-    if (this.onsetTimes.length < 3) return null;
+  _estimateTempo(targetBpm = null) {
+    const times = this.onsetTimes.slice(-12);
+    if (times.length < 3) return null;
+    const expectedIoi = targetBpm ? 60 / targetBpm : null;
+    const maxIoi = expectedIoi ? Math.min(this.options.maxIoiSeconds, expectedIoi * 2.2) : this.options.maxIoiSeconds;
+    const minIoi = expectedIoi ? Math.max(this.options.minIoiSeconds, expectedIoi * 0.45) : this.options.minIoiSeconds;
     const iois = [];
-    for (let i = 1; i < this.onsetTimes.length; i += 1) {
-      iois.push(this.onsetTimes[i] - this.onsetTimes[i - 1]);
+    for (let i = 1; i < times.length; i += 1) {
+      const diff = times[i] - times[i - 1];
+      if (diff >= minIoi && diff <= maxIoi) iois.push(diff);
     }
+    if (iois.length < 2) return null;
     const sorted = iois.slice().sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
+    const trim = Math.max(0, Math.floor(sorted.length * 0.15));
+    const trimmed = sorted.slice(trim, sorted.length - trim || sorted.length);
+    const median = trimmed[Math.floor(trimmed.length / 2)];
     if (!median || !Number.isFinite(median) || median <= 0) return null;
-    return 60 / median;
+    const rawTempo = 60 / median;
+    // Light smoothing to avoid wild jumps from a single bad interval.
+    if (this.lastTempoEstimate && Number.isFinite(this.lastTempoEstimate)) {
+      return this.lastTempoEstimate * 0.65 + rawTempo * 0.35;
+    }
+    return rawTempo;
   }
 
   _calculateDrift(onsetTime, params) {
@@ -117,7 +132,7 @@ export class TempoMonitor {
       }
     });
     if (best === null) return null;
-    if (bestAbs > beatDuration / 3) return null; // likely noise, too far from grid
+    if (bestAbs > beatDuration * 0.45) return null; // likely noise, too far from grid
     return best * 1000;
   }
 
@@ -128,10 +143,11 @@ export class TempoMonitor {
       return;
     }
     if (this.lastOnsetWallMs && performance.now() - this.lastOnsetWallMs > this.options.noDataTimeoutMs) {
+      this.recentDrifts = [];
+      this.onsetTimes = [];
       this._setStatus(this._makeStatus(STATUS.NO_DATA));
       return;
     }
-
     const driftCount = this.recentDrifts.length;
     if (driftCount < this.options.minDriftsForStatus) {
       this._setStatus(this._makeStatus(STATUS.NO_DATA));
