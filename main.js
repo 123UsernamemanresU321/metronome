@@ -28,7 +28,8 @@ import {
   deleteProfileBundle,
 } from './storage.js';
 import { setErrorText, trapFocus } from './ui.js';
-import { AudioInputAnalyzer } from './audioInput.js';
+import { AudioInputDetector } from './audioInput.js';
+import { TempoMonitor } from './tempoMonitor.js';
 import { GamesController, GAME_MODES } from './games.js';
 import { DEFAULT_PATTERNS, createEmptyPattern, toggleStep } from './patterns.js';
 import { Coach } from './coach.js';
@@ -71,6 +72,7 @@ const DEFAULT_SETTINGS = {
     blocksEnabled: false,
   },
   latency: { measuredMs: 0, manualMs: 0 },
+  micMonitorEnabled: false,
   midi: { enabled: false, tapNote: 60, transportNote: 62, inputId: null },
   helperSeen: false,
   debugEnabled: false,
@@ -94,7 +96,8 @@ const trainer = new TrainerController(
     if (key === 'block') elements.blockStatus.textContent = text;
   },
 );
-const audioInput = new AudioInputAnalyzer(metronome.audioCtx);
+const audioInput = new AudioInputDetector(metronome.audioCtx);
+const tempoMonitor = new TempoMonitor(metronome);
 const games = new GamesController(
   metronome,
   () => state.settings,
@@ -222,6 +225,12 @@ const elements = {
   tapCalibration: document.getElementById('tapCalibration'),
   micToggle: document.getElementById('micToggle'),
   micStatus: document.getElementById('micStatus'),
+  micTargetBpm: document.getElementById('micTargetBpm'),
+  micPlayerBpm: document.getElementById('micPlayerBpm'),
+  micDrift: document.getElementById('micDrift'),
+  micVerdict: document.getElementById('micVerdict'),
+  micMonitorCard: document.getElementById('micMonitorCard'),
+  micMonitorNote: document.getElementById('micMonitorNote'),
   midiStatus: document.getElementById('midiStatus'),
   midiInputSelect: document.getElementById('midiInputSelect'),
   midiTapNote: document.getElementById('midiTapNote'),
@@ -284,6 +293,7 @@ const state = {
   polyCounters: { A: -1, B: -1 },
   calibration: { active: false, taps: [] },
   midi: { supported: false, access: null, input: null, clockTicks: [] },
+  mic: { supported: true, permissionDenied: false },
   debugInterval: null,
   helperTrap: null,
   analysis: { hits: [] },
@@ -304,6 +314,7 @@ function normalizeSettings(settings) {
   merged.trainer.blocksEnabled = settings.trainer && typeof settings.trainer.blocksEnabled === 'boolean' ? settings.trainer.blocksEnabled : false;
   merged.subdivisionPattern = { ...DEFAULT_SETTINGS.subdivisionPattern, ...(settings.subdivisionPattern || {}) };
   merged.latency = { ...DEFAULT_SETTINGS.latency, ...(settings.latency || {}) };
+  merged.micMonitorEnabled = !!settings.micMonitorEnabled;
   merged.midi = { ...DEFAULT_SETTINGS.midi, ...(settings.midi || {}) };
   merged.helperSeen = !!settings.helperSeen;
   merged.debugEnabled = !!settings.debugEnabled;
@@ -397,6 +408,7 @@ function applySettingsToUI() {
   elements.midiTransportNote.value = s.midi.transportNote;
   elements.showHelper.checked = !s.helperSeen;
   elements.debugToggle.checked = s.debugEnabled;
+  if (elements.micToggle) elements.micToggle.checked = !!s.micMonitorEnabled;
   document.body.classList.toggle('theme-light', s.theme === 'light');
   document.body.classList.toggle('theme-dark', s.theme !== 'light');
   updateThemeButton();
@@ -441,6 +453,7 @@ function setBpmFromInput(value) {
   state.settings.bpm = bpm;
   metronome.setBpm(bpm);
   updateBpmUI(bpm);
+  updateMicMonitorUI();
   saveSettingsNow();
 }
 
@@ -624,6 +637,11 @@ function toggleStartStop() {
     clearPlayingState();
     finishSessionLog();
     stopSetlist();
+    if (state.settings.micMonitorEnabled) {
+      tempoMonitor.stop();
+      updateMicMonitorUI();
+      if (elements.micMonitorNote) elements.micMonitorNote.textContent = 'Metronome stopped.';
+    }
   } else {
     if (state.settings.quietMode) toggleQuietMode();
     if (state.settings.mute) toggleMute(false);
@@ -637,6 +655,11 @@ function toggleStartStop() {
     startTimer();
     startSessionLog();
     trainer.onStart();
+    if (state.settings.micMonitorEnabled && audioInput.enabled) {
+      tempoMonitor.start();
+      updateMicMonitorUI();
+      setMicStatus('Mic on • listening', 'green');
+    }
   }
 }
 
@@ -1502,6 +1525,13 @@ function switchProfile(id) {
   if (state.patterns.length) loadPatternToEditor(state.patterns[0].id);
   renderRhythmMap();
   renderProfilesUI();
+  updateMicMonitorUI();
+  if (state.settings.micMonitorEnabled) {
+    if (elements.micToggle) elements.micToggle.checked = true;
+    enableMicMonitor();
+  } else if (audioInput.enabled) {
+    disableMicMonitor();
+  }
 }
 
 function addProfile() {
@@ -1534,6 +1564,8 @@ function addProfile() {
   renderStats();
   renderPatternsList();
   renderProfilesUI();
+  updateMicMonitorUI();
+  if (audioInput.enabled) disableMicMonitor();
 }
 
 function renameProfile() {
@@ -2008,19 +2040,92 @@ function toggleDebugPanel() {
   if (state.settings.debugEnabled) updateDebug();
 }
 
-async function toggleMic() {
-  if (audioInput.enabled) {
-    audioInput.stop();
-    elements.micStatus.textContent = 'Mic disabled';
-    elements.micToggle.textContent = 'Enable mic';
-    return;
+function setMicStatus(text, tone = 'muted') {
+  if (!elements.micStatus) return;
+  elements.micStatus.textContent = text;
+  elements.micStatus.className = `status-pill ${tone}`;
+}
+
+function updateMicMonitorUI(status = tempoMonitor.getStatus()) {
+  const toneClasses = ['green', 'yellow', 'red', 'grey', 'muted'];
+  const target = status.targetBpm || state.settings.bpm || null;
+  const verdictColor = state.settings.micMonitorEnabled ? status.color || 'grey' : 'grey';
+  const verdictText = state.settings.micMonitorEnabled ? status.statusText || 'Listening...' : 'Mic off';
+  if (elements.micTargetBpm) elements.micTargetBpm.textContent = target ? (Math.round(target * 10) / 10).toFixed(1) : '--';
+  if (elements.micPlayerBpm) elements.micPlayerBpm.textContent = status.playerBpm && state.settings.micMonitorEnabled ? status.playerBpm.toFixed(1) : '--';
+  if (elements.micDrift) {
+    const drift =
+      typeof status.avgDriftMs === 'number' && state.settings.micMonitorEnabled
+        ? `${status.avgDriftMs > 0 ? '+' : ''}${status.avgDriftMs} ms`
+        : '--';
+    elements.micDrift.textContent = drift;
   }
+  if (elements.micVerdict) {
+    toneClasses.forEach((c) => elements.micVerdict.classList.remove(c));
+    elements.micVerdict.classList.add(verdictColor);
+    elements.micVerdict.textContent = verdictText;
+  }
+  if (elements.micMonitorCard) {
+    toneClasses.forEach((c) => elements.micMonitorCard.classList.remove(c));
+    elements.micMonitorCard.classList.add(verdictColor);
+  }
+  if (elements.micMonitorNote) {
+    if (!state.mic.supported) elements.micMonitorNote.textContent = 'Mic not supported in this browser.';
+    else if (!state.settings.micMonitorEnabled) elements.micMonitorNote.textContent = 'Mic monitor is off.';
+    else if (!audioInput.enabled) elements.micMonitorNote.textContent = 'Enable mic access to analyze timing.';
+    else if (!state.isRunning) elements.micMonitorNote.textContent = 'Start the metronome to analyze timing.';
+    else if (status.statusCode === 'NO_DATA') elements.micMonitorNote.textContent = 'Listening... play or clap near the mic.';
+    else elements.micMonitorNote.textContent = 'Comparing your hits to the current beat grid.';
+  }
+}
+
+async function enableMicMonitor() {
+  if (!audioInput.isSupported || !audioInput.isSupported()) {
+    state.mic.supported = false;
+    setMicStatus('Mic not supported in this browser', 'red');
+    updateMicMonitorUI();
+    if (elements.micToggle) elements.micToggle.checked = false;
+    return false;
+  }
+  try {
+    if (metronome.audioCtx?.state === 'suspended') await metronome.audioCtx.resume();
+  } catch (e) {}
   const ok = await audioInput.start();
-  if (ok) {
-    elements.micStatus.textContent = 'Mic enabled';
-    elements.micToggle.textContent = 'Disable mic';
+  if (!ok) {
+    state.mic.permissionDenied = true;
+    setMicStatus('Mic permission denied or unavailable', 'red');
+    if (elements.micToggle) elements.micToggle.checked = false;
+    state.settings.micMonitorEnabled = false;
+    saveSettingsNow();
+    updateMicMonitorUI();
+    return false;
+  }
+  state.mic.supported = true;
+  state.mic.permissionDenied = false;
+  state.settings.micMonitorEnabled = true;
+  tempoMonitor.start();
+  setMicStatus('Mic on • listening', 'green');
+  updateMicMonitorUI();
+  if (elements.micToggle) elements.micToggle.checked = true;
+  saveSettingsNow();
+  return true;
+}
+
+function disableMicMonitor() {
+  state.settings.micMonitorEnabled = false;
+  audioInput.stop();
+  tempoMonitor.stop();
+  setMicStatus('Mic off', 'muted');
+  updateMicMonitorUI();
+  if (elements.micToggle) elements.micToggle.checked = false;
+  saveSettingsNow();
+}
+
+async function toggleMic() {
+  if (elements.micToggle?.checked) {
+    await enableMicMonitor();
   } else {
-    elements.micStatus.textContent = 'Mic permission denied or unavailable';
+    disableMicMonitor();
   }
 }
 
@@ -2157,7 +2262,7 @@ function attachEventListeners() {
   elements.audioHelp.addEventListener('click', () => {
     elements.audioStatus.textContent = 'If silent: tap Start, ensure device not muted, interact to unlock audio.';
   });
-  elements.micToggle.addEventListener('click', toggleMic);
+  elements.micToggle.addEventListener('change', toggleMic);
   elements.startGameHit.addEventListener('click', () => {
     games.startHit(Number(elements.gameHitDuration.value) || 45);
     state.lastGameResult = null;
@@ -2258,6 +2363,8 @@ function init() {
   normalizeAccents();
   applySettingsToEngine();
   applySettingsToUI();
+  updateMicMonitorUI();
+  setMicStatus('Mic off', 'muted');
   buildBeatIndicators();
   buildSubdivisionPatternUI();
   renderPresets();
@@ -2285,7 +2392,19 @@ function init() {
   initHelper();
   initDebug();
   trainer.warmups = state.warmups;
-  audioInput.onPeak = (t) => processTap(t * 1000, true);
+  tempoMonitor.onStatusChange(updateMicMonitorUI);
+  audioInput.onOnset(({ time }) => {
+    processTap(time * 1000, true);
+    tempoMonitor.handleOnset(time);
+  });
+  state.mic.supported = audioInput.isSupported ? audioInput.isSupported() : true;
+  if (!state.mic.supported) {
+    setMicStatus('Mic not supported in this browser', 'red');
+    if (elements.micToggle) elements.micToggle.disabled = true;
+  } else if (state.settings.micMonitorEnabled) {
+    if (elements.micToggle) elements.micToggle.checked = true;
+    enableMicMonitor();
+  }
   renderPatternsList();
 }
 
