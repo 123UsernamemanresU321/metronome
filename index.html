@@ -554,14 +554,36 @@
         </div>
 
         <div class="advanced-card">
-          <h3>Audio Input Training</h3>
-          <p class="subtext">Enable mic to analyze claps/taps locally. Nothing leaves your browser.</p>
-          <div class="inline-group">
-            <button id="micToggle" class="pill-btn small">Enable mic</button>
-              <span id="micStatus" class="subtext">Mic idle</span>
-            </div>
-            <p class="subtext">Peaks detected while running will be compared to the metronome for timing reports.</p>
+          <h3>Mic Tempo Monitor</h3>
+          <p class="subtext">Detect your playing against the metronome grid in real time. All processing stays local.</p>
+          <div class="mic-header">
+            <label class="inline-toggle">
+              <input id="micToggle" type="checkbox">
+              <span>Mic tempo monitor</span>
+            </label>
+            <span id="micStatus" class="status-pill muted">Mic off</span>
           </div>
+          <div id="micMonitorCard" class="mic-monitor-card grey">
+            <div class="mic-stat">
+              <p class="label">Target BPM</p>
+              <p id="micTargetBpm" class="stat-value">--</p>
+            </div>
+            <div class="mic-stat">
+              <p class="label">Your BPM</p>
+              <p id="micPlayerBpm" class="stat-value">--</p>
+            </div>
+            <div class="mic-stat">
+              <p class="label">Avg drift</p>
+              <p id="micDrift" class="stat-value">--</p>
+            </div>
+            <div class="mic-stat verdict">
+              <p class="label">Verdict</p>
+              <div id="micVerdict" class="status-pill muted">Mic off</div>
+            </div>
+          </div>
+          <p id="micMonitorNote" class="subtext">Toggle the mic to compare your timing to the click.</p>
+          <p class="subtext small">All audio is processed locally in your browser. No recordings are sent anywhere.</p>
+        </div>
 
           <div class="advanced-card" id="midiCard">
             <h3>MIDI</h3>
