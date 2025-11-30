@@ -293,7 +293,7 @@ const state = {
   polyCounters: { A: -1, B: -1 },
   calibration: { active: false, taps: [] },
   midi: { supported: false, access: null, input: null, clockTicks: [] },
-  mic: { supported: true, permissionDenied: false },
+  mic: { supported: true, permissionDenied: false, lastHitAt: 0, hits: 0 },
   debugInterval: null,
   helperTrap: null,
   analysis: { hits: [] },
@@ -2074,7 +2074,14 @@ function updateMicMonitorUI(status = tempoMonitor.getStatus()) {
     else if (!state.settings.micMonitorEnabled) elements.micMonitorNote.textContent = 'Mic monitor is off.';
     else if (!audioInput.enabled) elements.micMonitorNote.textContent = 'Enable mic access to analyze timing.';
     else if (!state.isRunning) elements.micMonitorNote.textContent = 'Start the metronome to analyze timing.';
-    else if (status.statusCode === 'NO_DATA') elements.micMonitorNote.textContent = 'Listening... play or clap near the mic.';
+    else if (status.statusCode === 'NO_DATA') {
+      if (state.mic.hits > 0) {
+        const since = state.mic.lastHitAt ? Math.round((Date.now() - state.mic.lastHitAt) / 1000) : 0;
+        elements.micMonitorNote.textContent = since ? `Heard ${state.mic.hits} hits (${since}s ago)... keep playing.` : 'Heard hits... syncing.';
+      } else {
+        elements.micMonitorNote.textContent = 'Listening... play or clap near the mic.';
+      }
+    }
     else elements.micMonitorNote.textContent = 'Comparing your hits to the current beat grid.';
   }
 }
@@ -2103,6 +2110,8 @@ async function enableMicMonitor() {
   state.mic.supported = true;
   state.mic.permissionDenied = false;
   state.settings.micMonitorEnabled = true;
+  state.mic.hits = 0;
+  state.mic.lastHitAt = 0;
   tempoMonitor.start();
   setMicStatus('Mic on • listening', 'green');
   updateMicMonitorUI();
@@ -2113,6 +2122,8 @@ async function enableMicMonitor() {
 
 function disableMicMonitor() {
   state.settings.micMonitorEnabled = false;
+  state.mic.hits = 0;
+  state.mic.lastHitAt = 0;
   audioInput.stop();
   tempoMonitor.stop();
   setMicStatus('Mic off', 'muted');
@@ -2396,6 +2407,10 @@ function init() {
   audioInput.onOnset(({ time }) => {
     processTap(time * 1000, true);
     tempoMonitor.handleOnset(time);
+    state.mic.lastHitAt = Date.now();
+    state.mic.hits += 1;
+    setMicStatus('Mic on • hit detected', 'green');
+    updateMicMonitorUI();
   });
   state.mic.supported = audioInput.isSupported ? audioInput.isSupported() : true;
   if (!state.mic.supported) {
@@ -2404,6 +2419,8 @@ function init() {
   } else if (state.settings.micMonitorEnabled) {
     if (elements.micToggle) elements.micToggle.checked = true;
     enableMicMonitor();
+  } else {
+    updateMicMonitorUI();
   }
   renderPatternsList();
 }
