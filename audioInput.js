@@ -1,66 +1,132 @@
-// AudioInputAnalyzer: lightweight onset detector using the main AudioContext.
-export class AudioInputAnalyzer {
-  constructor(audioCtx) {
+// AudioInputDetector: microphone capture + simple energy-based onset detection.
+// It tracks a smoothed baseline level and emits onsets when the short-term energy
+// crosses a dynamic threshold and respects a refractory window.
+const DEFAULT_OPTIONS = {
+  minInterval: 0.1, // seconds between onsets to avoid double triggers
+  thresholdFactor: 3, // multiplier over baseline energy
+  smoothing: 0.995, // baseline decay; closer to 1 = slower updates
+  fftSize: 1024,
+  filterFrequency: 120,
+};
+
+export class AudioInputDetector {
+  constructor(audioCtx, options = {}) {
     this.audioCtx = audioCtx;
+    this.options = { ...DEFAULT_OPTIONS, ...options };
+
     this.stream = null;
     this.source = null;
-    this.highpass = null;
-    this.analyser = null;
-    this.data = null;
-    this.raf = null;
-    this.onPeak = null;
+    this.filter = null;
+    this.processor = null;
+    this.silence = null;
+
+    this.onsetCallbacks = [];
     this.enabled = false;
-    this.threshold = 0.25;
-    this.decay = 0.92;
-    this.prevLevel = 0;
+    this.lastOnsetTime = 0;
+    this.baselineEnergy = 0;
+  }
+
+  isSupported() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
   }
 
   async start() {
     if (this.enabled) return true;
+    if (!this.isSupported()) return false;
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.source = this.audioCtx.createMediaStreamSource(this.stream);
-      this.highpass = this.audioCtx.createBiquadFilter();
-      this.highpass.type = 'highpass';
-      this.highpass.frequency.value = 400;
-      this.analyser = this.audioCtx.createAnalyser();
-      this.analyser.fftSize = 512;
-      this.data = new Uint8Array(this.analyser.fftSize);
-      this.source.connect(this.highpass).connect(this.analyser);
+      this.filter = this.audioCtx.createBiquadFilter();
+      this.filter.type = 'highpass';
+      this.filter.frequency.value = this.options.filterFrequency;
+      this.processor = this.audioCtx.createScriptProcessor(this.options.fftSize, this.source.channelCount || 1, 1);
+      // Keep processor running with a silent sink.
+      this.silence = this.audioCtx.createGain();
+      this.silence.gain.value = 0;
+
+      this.source.connect(this.filter);
+      this.filter.connect(this.processor);
+      this.processor.connect(this.silence);
+      this.silence.connect(this.audioCtx.destination);
+
+      this.processor.onaudioprocess = (ev) => this._handleAudio(ev);
       this.enabled = true;
-      this._loop();
+      this.baselineEnergy = 0;
+      this.lastOnsetTime = 0;
       return true;
     } catch (e) {
-      this.enabled = false;
+      this.stop();
       return false;
     }
   }
 
   stop() {
     this.enabled = false;
-    if (this.raf) cancelAnimationFrame(this.raf);
+    if (this.processor) this.processor.disconnect();
+    if (this.silence) this.silence.disconnect();
+    if (this.filter) this.filter.disconnect();
+    if (this.source) this.source.disconnect();
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
     }
     this.stream = null;
+    this.source = null;
+    this.filter = null;
+    this.processor = null;
+    this.silence = null;
+    this.baselineEnergy = 0;
   }
 
-  _loop() {
-    if (!this.enabled) return;
-    this.analyser.getByteTimeDomainData(this.data);
-    let level = 0;
-    for (let i = 0; i < this.data.length; i += 1) {
-      const v = (this.data[i] - 128) / 128;
-      level += Math.abs(v);
-    }
-    level /= this.data.length;
-    this.prevLevel = this.prevLevel * this.decay + level * (1 - this.decay);
-    if (level > this.prevLevel + this.threshold) {
-      if (typeof this.onPeak === 'function') {
-        this.onPeak(this.audioCtx.currentTime);
+  onOnset(callback) {
+    if (typeof callback === 'function') this.onsetCallbacks.push(callback);
+  }
+
+  _emitOnset(payload) {
+    this.onsetCallbacks.forEach((cb) => {
+      try {
+        cb(payload);
+      } catch (e) {
+        // ignore callback errors
       }
-      this.prevLevel = level; // reset to avoid double triggers
+    });
+  }
+
+  _handleAudio(event) {
+    if (!this.enabled) return;
+    const input = event.inputBuffer;
+    const channels = [];
+    for (let c = 0; c < input.numberOfChannels; c += 1) {
+      channels.push(input.getChannelData(c));
     }
-    this.raf = requestAnimationFrame(() => this._loop());
+    const frames = input.length;
+    if (!frames || !channels.length) return;
+
+    let energy = 0;
+    for (let i = 0; i < frames; i += 1) {
+      let sample = 0;
+      for (let c = 0; c < channels.length; c += 1) {
+        sample += channels[c][i];
+      }
+      sample /= channels.length;
+      energy += sample * sample;
+    }
+    energy /= frames;
+
+    // Initialize baseline quickly on first frames.
+    if (this.baselineEnergy === 0) this.baselineEnergy = energy;
+    this.baselineEnergy =
+      this.baselineEnergy * this.options.smoothing + energy * (1 - this.options.smoothing);
+
+    const threshold = this.baselineEnergy * this.options.thresholdFactor + 1e-7;
+    const now = this.audioCtx.currentTime;
+    if (energy > threshold && now - this.lastOnsetTime > this.options.minInterval) {
+      this.lastOnsetTime = now;
+      this._emitOnset({ time: now, energy });
+      // Raise the baseline briefly after an onset to reduce double triggers.
+      this.baselineEnergy = Math.max(this.baselineEnergy, energy);
+    }
   }
 }
+
+// Export legacy name for backward compatibility.
+export { AudioInputDetector as AudioInputAnalyzer };
