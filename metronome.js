@@ -41,6 +41,7 @@ export default class Metronome {
     this.quietMode = false;
     this.grooveChallenge = 0; // 0-1 jitter factor
     this.latencyOffset = 0; // seconds, positive schedules slightly earlier
+    this.latencyOffsetMs = 0;
     this.silentBars = { enabled: false, every: 4 };
     this.phrase = { enabled: false, length: 4, target: 0 };
     this.countInBars = 0;
@@ -61,6 +62,9 @@ export default class Metronome {
     this.isPlaying = false;
     this.currentBeat = 0;
     this.nextNoteTime = 0;
+    this.lastBarStartTime = 0;
+    this.lastBarIndex = 0;
+    this.lastBeatDuration = (60 / this.bpm) * (4 / this.beatUnit);
     this.timerId = null;
     this.onTick = null; // callback for UI updates
     this.onPolyTick = null; // callback for polyrhythm layer updates
@@ -82,6 +86,9 @@ export default class Metronome {
     this.currentBeat = 0;
     this.countInRemaining = this.countInBars;
     this.isCountingIn = this.countInBars > 0;
+    this.lastBarStartTime = this.audioCtx.currentTime;
+    this.lastBarIndex = 0;
+    this.lastBeatDuration = this._beatDuration();
     this._resetPolyState();
     this.nextNoteTime = this.audioCtx.currentTime + 0.05; // small offset so first beat schedules cleanly
     this.timerId = setInterval(() => this._scheduler(), this.lookahead * 1000);
@@ -98,6 +105,7 @@ export default class Metronome {
 
   setBpm(bpm) {
     this.bpm = clamp(bpm, 1, 600);
+    this.lastBeatDuration = this._beatDuration();
   }
 
   setTimeSignature(signature) {
@@ -106,6 +114,7 @@ export default class Metronome {
     const unit = parseInt(signature.split('/')[1], 10) || 4;
     this.beatsPerBar = beats;
     this.beatUnit = unit;
+    this.lastBeatDuration = this._beatDuration();
     if (!Array.isArray(this.beatAccents)) {
       this.beatAccents = [];
     }
@@ -155,6 +164,7 @@ export default class Metronome {
 
   setLatencyOffset(ms) {
     const capped = clamp(ms || 0, -200, 200); // clamp for safety
+    this.latencyOffsetMs = capped;
     this.latencyOffset = capped / 1000;
   }
 
@@ -208,27 +218,21 @@ export default class Metronome {
 
     const ctx = this.audioCtx;
     const horizon = ctx.currentTime + this.scheduleAheadTime;
-    const beatDuration = (60 / this.bpm) * (4 / this.beatUnit);
+    const beatDuration = this._beatDuration();
 
     // Schedule notes slightly ahead of the current time to keep steady timing.
     while (this.nextNoteTime < horizon) {
       const beatInBar = this.currentBeat % this.beatsPerBar;
       const barIndex = Math.floor(this.currentBeat / this.beatsPerBar);
       const barStartTime = this.nextNoteTime - beatInBar * beatDuration;
+      this.lastBarStartTime = barStartTime;
+      this.lastBarIndex = barIndex;
+      this.lastBeatDuration = beatDuration;
       const isSilentBar = this.silentBars.enabled && this.silentBars.every > 0 && ((barIndex + 1) % this.silentBars.every === 0);
       const isCountIn = this.isCountingIn;
       const playAudio = !this.muted && !this.quietMode && !isSilentBar;
       const subPattern = this.subdivisionPattern[this.subdivision] || [];
-      const totalSubdivisions =
-        this.subdivision === 'eighth'
-          ? 2
-          : this.subdivision === 'triplet'
-          ? 3
-          : this.subdivision === 'sixteenth'
-          ? 4
-          : this.subdivision === 'quintuplet'
-          ? 5
-          : 1;
+      const totalSubdivisions = this._subdivisionCount();
       const offsetTime = Math.max(ctx.currentTime + 0.001, this.nextNoteTime - this.latencyOffset);
 
       if (beatInBar === 0) {
@@ -415,5 +419,72 @@ export default class Metronome {
       const time = Math.max(this.audioCtx.currentTime + 0.001, start + idx * stepDur - this.latencyOffset + this._jitter());
       this._scheduleClick(time, hit === 2, false, { sound: this.sound });
     });
+  }
+
+  _beatDuration() {
+    return (60 / this.bpm) * (4 / (this.beatUnit || 4));
+  }
+
+  _subdivisionCount() {
+    return this.subdivision === 'eighth'
+      ? 2
+      : this.subdivision === 'triplet'
+      ? 3
+      : this.subdivision === 'sixteenth'
+      ? 4
+      : this.subdivision === 'quintuplet'
+      ? 5
+      : 1;
+  }
+
+  getParams() {
+    return {
+      bpm: this.bpm,
+      beatsPerBar: this.beatsPerBar,
+      beatUnit: this.beatUnit,
+      subdivision: this.subdivision,
+      swing: this.swing,
+      barStartTime: this.lastBarStartTime || (this.audioCtx ? this.audioCtx.currentTime : 0),
+      audioLatencyMs: this.latencyOffsetMs || 0,
+    };
+  }
+
+  // Builds expected beat/subdivision times around a given AudioContext time.
+  getBeatGridAround(time, windowSeconds = 1.0) {
+    const beatDuration = this._beatDuration();
+    const barDuration = beatDuration * this.beatsPerBar;
+    const start = time - windowSeconds;
+    const end = time + windowSeconds;
+    const anchor = this.lastBarStartTime || (this.audioCtx ? this.audioCtx.currentTime : 0);
+    const barsBack = Math.floor((start - anchor) / barDuration);
+    let barStart = anchor + barsBack * barDuration;
+    let barIndex = this.lastBarIndex + barsBack;
+    const events = [];
+    const totalSubdivisions = this._subdivisionCount();
+
+    // Walk bars in the window and emit beats + subdivisions.
+    while (barStart <= end + barDuration) {
+      for (let beat = 0; beat < this.beatsPerBar; beat += 1) {
+        const beatTime = barStart + beat * beatDuration;
+        if (beatTime >= start && beatTime <= end) {
+          events.push({ time: beatTime, barIndex, beatIndex: beat, subdivisionIndex: 0 });
+        }
+        if (totalSubdivisions > 1) {
+          for (let s = 1; s < totalSubdivisions; s += 1) {
+            let offset = beatDuration * (s / totalSubdivisions);
+            if (this.subdivision === 'eighth' && s === 1 && this.swing > 0) {
+              offset += (beatDuration / 2) * 0.6 * this.swing;
+            }
+            const subTime = beatTime + offset;
+            if (subTime >= start && subTime <= end) {
+              events.push({ time: subTime, barIndex, beatIndex: beat, subdivisionIndex: s });
+            }
+          }
+        }
+      }
+      barStart += barDuration;
+      barIndex += 1;
+    }
+    return events;
   }
 }
