@@ -2422,6 +2422,14 @@ function init() {
   } else {
     updateMicMonitorUI();
   }
+  // Periodic sanity ping to ensure mic still capturing.
+  setInterval(() => {
+    if (!state.settings.micMonitorEnabled || !audioInput.enabled) return;
+    if (state.mic.lastHitAt && Date.now() - state.mic.lastHitAt > 7000) {
+      setMicStatus('Mic on • no hits yet', 'yellow');
+      updateMicMonitorUI();
+    }
+  }, 3000);
   renderPatternsList();
 }
 
