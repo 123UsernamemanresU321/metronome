@@ -2,8 +2,8 @@
 // It tracks a smoothed baseline level and emits onsets when the short-term energy
 // crosses a dynamic threshold and respects a refractory window.
 const DEFAULT_OPTIONS = {
-  minInterval: 0.16, // seconds between onsets to avoid double triggers
-  thresholdFactor: 3.5, // multiplier over baseline energy
+  minInterval: 0.12, // seconds between onsets to avoid double triggers but allow faster passages
+  thresholdFactor: 2.5, // multiplier over baseline energy
   smoothing: 0.995, // baseline decay; closer to 1 = slower updates
   fftSize: 1024,
   filterFrequency: 120,
