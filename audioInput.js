@@ -27,6 +27,7 @@ export class AudioInputDetector {
     this.lastOnsetTime = 0;
     this.baselineEnergy = 0;
     this.prevEnergy = 0;
+    this.lastEnergy = 0;
   }
 
   isSupported() {
@@ -115,6 +116,7 @@ export class AudioInputDetector {
       energy += sample * sample;
     }
     energy /= frames;
+    this.lastEnergy = energy;
     if (energy < this.options.minEnergy) {
       this.prevEnergy = energy;
       return;
