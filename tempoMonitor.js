@@ -145,12 +145,12 @@ export class TempoMonitor {
     if (this.lastOnsetWallMs && performance.now() - this.lastOnsetWallMs > this.options.noDataTimeoutMs) {
       this.recentDrifts = [];
       this.onsetTimes = [];
-      this._setStatus(this._makeStatus(STATUS.NO_DATA));
+      this._setStatus(this._makeStatus(STATUS.NO_DATA, null, params.bpm, this.lastTempoEstimate));
       return;
     }
     const driftCount = this.recentDrifts.length;
     if (driftCount < this.options.minDriftsForStatus) {
-      this._setStatus(this._makeStatus(STATUS.NO_DATA));
+      this._setStatus(this._makeStatus(STATUS.NO_DATA, null, params.bpm, this.lastTempoEstimate));
       return;
     }
     const avgDriftMs = this.recentDrifts.reduce((a, b) => a + b, 0) / driftCount;
@@ -205,6 +205,9 @@ export class TempoMonitor {
 
     let text = 'Waiting for clear hits...';
     let color = 'grey';
+    if (code === STATUS.NO_DATA && playerBpm) {
+      text = 'Heard hits… syncing to grid';
+    }
     if (code === STATUS.IN_TIME) {
       text = 'In time';
       color = 'green';
